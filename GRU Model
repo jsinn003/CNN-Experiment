@@ -1,0 +1,45 @@
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
+from keras.layers import Dense, LSTM, GRU, Dropout
+import yfinance as yf
+
+start = '2019-01-01'
+end = '2024-03-04'
+data = yf.download("SPY", start=start, end=end, progress=False)
+data = data.sort_values(by=['Date'], ignore_index=True)
+data = data.dropna()
+data = data[['Close', 'Volume', 'Open', 'High', 'Low']]
+print(data)
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaled_data = scaler.fit_transform(data)
+lookback = 60
+n_features = 5
+X = []
+y = []
+for i in range(lookback, len(scaled_data)):
+    X.append(scaled_data[i-lookback:i, :])
+    y.append(scaled_data[i, 0])
+X, y = np.array(X), np.array(y)
+train_size = int(len(X)*0.8)
+test_size = len(X) - train_size
+X_train, X_test = X[:train_size], X[train_size:]
+y_train, y_test = y[:train_size], y[train_size:]
+model = Sequential()
+model.add(GRU(units=80, return_sequences=True, input_shape=(lookback, n_features)))
+model.add(Dropout(0.2))
+model.add(GRU(units=100))
+model.add(Dropout(0.2))
+model.add(Dense(units=1))
+model.compile(optimizer='adam', loss='mean_squared_error')
+model.fit(X_train, y_train, epochs=80, batch_size=32)
+predictions = model.predict(X_test)
+rmse = np.sqrt(np.mean(predictions - y_test)**2)
+print("Root Mean Squared Error: ", rmse)
+import matplotlib.pyplot as plt
+plt.plot(y_test)
+plt.plot(predictions)
+plt.show()
+predictions[-1]/y_test[-1]
+# predictions[-1]/predictions[-2]
