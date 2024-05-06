@@ -1,0 +1,123 @@
+#include <stdio.h>
+#include <string.h>
+#define SEATING_CAPACITY 5
+
+typedef struct {
+    char name[20];
+    int ID;
+    int status;
+} Seat;
+
+Seat seating[SEATING_CAPACITY];
+
+void listTakenSeat() {
+    printf("listTakenSeat(): \n");
+
+    int found = 0;
+    for (int i = 0; i < SEATING_CAPACITY; i++) {
+        if (seating[i].status == 1) {
+            printf("Customer name: %s\t Seat number (ID): %d\n", seating[i].name, seating[i].ID);
+            found = 1;
+        }
+    }
+
+    if (!found) {
+        printf("The seat assignment list is empty \n");
+    }
+}
+
+void assignSeat() {
+    printf("assignSeat(): \n");
+    int id;
+    char name[20];
+    int checkSeat = 0;
+    for(int i = 0; i < SEATING_CAPACITY; i++){
+        if(seating[i].status == 1){
+            checkSeat++;
+        }
+    }
+    if(checkSeat == SEATING_CAPACITY){
+        printf("The plane is full \n");
+        return;
+    }else{
+        printf("Enter the seat number: \n");
+        for(int j = 0; j < SEATING_CAPACITY; j++){
+            scanf("%d", &id);
+            if(id < 1 || id > 5){
+                printf("Please enter a seat number between 1 and 5 \n");
+                continue;
+            }else if(seating[id - 1].status == 1) {
+                printf("Occupied! Please choose another seat \n");
+                continue;
+            }else{
+                printf("Enter customer name:\n");
+                while(getchar() != '\n'); 
+                fgets(seating[id - 1].name, 20, stdin);
+                seating[id - 1].status = 1;
+                seating[id - 1].ID = id;
+                printf("The seat has been assigned successfully \n");
+                break;
+            }
+        }
+    }
+}
+
+void removeSeat() {
+    printf("removeSeat():\n");
+    int id;
+    int checkSeat = 0;
+    for (int i = 0; i < SEATING_CAPACITY; i++) {
+        if (seating[i].status == 1) {
+            checkSeat++;
+        }
+    }
+    if (checkSeat == 0) {
+        printf("All the seats are vacant \n");
+        return;
+    }else{
+        printf("Enter the seat number: \n");
+        for(int j = 0; j < SEATING_CAPACITY; j++){
+            scanf("%d", &id);
+            if (id < 1 || id > 5) {
+                printf("Please enter a seat number between 1 and 5 \n");
+                continue;
+            } else if (seating[id - 1].status == 0) {
+                printf("Empty! Enter another seat number for removal \n");
+                continue;
+            } else {
+                seating[id - 1].status = 0;
+                seating[id - 1].ID = 0;
+                printf("Removal is successful \n");
+                break;
+            }
+        }
+    }
+}
+
+int main() {
+    int choice;
+    printf("AIRLINES SEATING RESERVATION PROGRAM: \n");
+    printf("1: listTakenSeat() \n");
+    printf("2: assignSeat() \n");
+    printf("3: removeSeat() \n");
+    printf("4: quit\n");
+    while(1) {
+        printf("Enter your choice: \n");
+        scanf("%d", &choice);
+
+        if (choice == 1) {
+            listTakenSeat();
+        } else if (choice == 2) {
+            assignSeat();
+        } else if (choice == 3) {
+            removeSeat();
+        } else if (choice == 4) {
+            printf("Goodbye!\n");
+            break;
+        } else {
+            printf("Invalid choice. Please try again.\n");
+        }
+    }
+    return 0;
+}
+
