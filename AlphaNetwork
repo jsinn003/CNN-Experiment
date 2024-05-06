@@ -1,3 +1,5 @@
+# The project attempts to recreate AlphaNet, a network proposed by Huatai Securities. The model is still in progress and currently consists only of a network structure; it has not yet been trained with data.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 import numpy as np
 import torch
 import torch.nn as nn
