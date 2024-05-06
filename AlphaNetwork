@@ -1,0 +1,220 @@
+import numpy as np
+import torch
+import torch.nn as nn
+from torchsummary import summary
+import numpy as np
+
+
+def make_combinations(num):
+    combo_list = [[i, j] for i in range(1, num) for j in range(i)]
+    combo_rev_list = [[j, i] for i in range(1, num) for j in range(i)]
+    return combo_list, combo_rev_list
+
+
+combo_list, combo_rev_list = make_combinations(7)
+
+
+def make_indices(matrix, stride):
+    width = matrix.shape[3]
+    mod = width % stride
+    indices = list(np.arange(0, width + stride - mod, stride)) if mod != 0 else list(
+        np.arange(0, width + stride, stride))
+    indices += [width] if mod != 0 else []
+    return indices
+
+
+indices_list = make_indices(np.zeros((1, 1, 7, 30)), 10)
+
+
+class InceptionNetwork(nn.Module):
+    def __init__(self, combos, combos_rev, indices_list):
+        super(InceptionNetwork, self).__init__()
+        self.combos = combos
+        self.combos_rev = combos_rev
+        self.indices_list = indices_list
+        self.d = len(indices_list) - 1
+        self.bn1 = nn.BatchNorm2d(1)
+        self.bn2 = nn.BatchNorm2d(1)
+        self.bn3 = nn.BatchNorm2d(1)
+        self.bn4 = nn.BatchNorm2d(1)
+        self.bn5 = nn.BatchNorm2d(1)
+        self.bn6 = nn.BatchNorm2d(1)
+        self.bn7 = nn.BatchNorm2d(1)
+        self.max_pool = nn.MaxPool2d(kernel_size=(1, self.d))
+        self.avg_pool = nn.AvgPool2d(kernel_size=(1, self.d))
+        self.min_pool = nn.MaxPool2d(kernel_size=(1, self.d))
+        self.bn_pool1 = nn.BatchNorm2d(1)
+        self.bn_pool2 = nn.BatchNorm2d(1)
+        self.bn_pool3 = nn.BatchNorm2d(1)
+
+    def forward(self, data):
+        data = data.detach().cpu().numpy()
+        combos = self.combos
+        combos_rev = self.combos_rev
+        conv1 = self.correlation_4d(data, combos, combos_rev).to(torch.float)
+        conv2 = self.covariance_4d(data, combos, combos_rev).to(torch.float)
+        conv3 = self.standard_deviation_4d(data).to(torch.float)
+        conv4 = self.zscore_4d(data).to(torch.float)
+        conv5 = self.return_4d(data).to(torch.float)
+        conv6 = self.decay_linear_4d(data).to(torch.float)
+        conv7 = self.mean_4d(data).to(torch.float)
+        batch1 = self.bn1(conv1)
+        batch2 = self.bn2(conv2)
+        batch3 = self.bn3(conv3)
+        batch4 = self.bn4(conv4)
+        batch5 = self.bn5(conv5)
+        batch6 = self.bn6(conv6)
+        batch7 = self.bn7(conv7)
+        feature = torch.cat([batch1, batch2, batch3, batch4, batch5, batch6, batch7], axis=2)
+        feature_flatten = feature.flatten(start_dim=1)
+        maxpool = self.max_pool(feature)
+        maxpool = self.bn_pool1(maxpool)
+        avgpool = self.avg_pool(feature)
+        avgpool = self.bn_pool2(avgpool)
+        minpool = -self.min_pool(-1 * feature)
+        minpool = self.bn_pool3(minpool)
+        pool_cat = torch.cat([maxpool, avgpool, minpool], axis=2)
+        pool_cat_flatten = pool_cat.flatten(start_dim=1)
+        feature_final = torch.cat([feature_flatten, pool_cat_flatten], axis=1)
+        return feature_final
+
+
+    def correlation_4d(self, mat, combos, combos_rev):
+        new_H = len(combos)
+        indices_list = self.indices_list
+        correlation_list = []
+        for i in range(len(indices_list) - 1):
+            start_index = indices_list[i]
+            end_index = indices_list[i + 1]
+            data = mat[:, :, combos, start_index:end_index]
+            data2 = mat[:, :, combos_rev, start_index:end_index]
+            std1 = np.std(data, axis=4, keepdims=True)
+            std2 = np.std(data2, axis=4, keepdims=True)
+            correlation = (std1 * std2).mean(axis=3, keepdims=True)
+            correlation_list.append(correlation)
+        adjusted_std = np.squeeze(np.array(correlation_list)).transpose(1, 2, 0).reshape(-1, 1, new_H,
+                                                                                         len(indices_list) - 1) + 0.01
+        covariance = self.covariance_4d(mat, combos, combos_rev)
+        correlation_result = covariance / adjusted_std
+        return correlation_result
+
+    def covariance_4d(self, mat, combos, combos_rev):
+        new_H = len(combos)
+        indices_list = self.indices_list
+        list_ = []
+        for i in range(len(indices_list) - 1):
+            start_index = indices_list[i]
+            end_index = indices_list[i + 1]
+            data = mat[:, :, combos, start_index:end_index]
+            data2 = mat[:, :, combos_rev, start_index:end_index]
+            mean1 = data.mean(axis=4, keepdims=True)
+            mean2 = data2.mean(axis=4, keepdims=True)
+            spread1 = data - mean1
+            spread2 = data2 - mean2
+            cov = ((spread1 * spread2).sum(axis=4, keepdims=True) / (data.shape[4] - 1)).mean(axis=3, keepdims=True)
+            list_.append(cov)
+        cov = np.squeeze(np.array(list_)).transpose(1, 2, 0).reshape(-1, 1, new_H, len(indices_list) - 1)
+        return torch.from_numpy(cov)
+
+    def standard_deviation_4d(self, mat):
+        new_H = mat.shape[2]
+        indices_list = self.indices_list
+        list_ = []
+        for i in range(len(indices_list) - 1):
+            start_index = indices_list[i]
+            end_index = indices_list[i + 1]
+            data = mat[:, :, :, start_index:end_index]
+            std = data.std(axis=3, keepdims=True)
+            list_.append(std)
+        std4d = np.squeeze(np.array(list_)).transpose(1, 2, 0).reshape(-1, 1, new_H, len(indices_list) - 1)
+        return torch.from_numpy(std4d)
+
+    def zscore_4d(self, mat):
+        new_H = mat.shape[2]
+        indices_list = self.indices_list
+        list_ = []
+        for i in range(len(indices_list) - 1):
+            start_index = indices_list[i]
+            end_index = indices_list[i + 1]
+            data = mat[:, :, :, start_index:end_index]
+            mean = data.mean(axis=3, keepdims=True)
+            std = data.std(axis=3, keepdims=True) + 0.01
+            list_.append(mean / std)
+        zscore = np.squeeze(np.array(list_)).transpose(1, 2, 0).reshape(-1, 1, new_H, len(indices_list) - 1)
+        return torch.from_numpy(zscore)
+
+    def return_4d(self, mat):
+        new_H = mat.shape[2]
+        indices_list = self.indices_list
+        list_ = []
+        for i in range(len(indices_list) - 1):
+            start_index = indices_list[i]
+            end_index = indices_list[i + 1]
+            data = mat[:, :, :, start_index:end_index]
+            return_ = data[:, :, :, -1] / (data[:, :, :, 0] + 0.01) - 1
+            list_.append(return_)
+        ts_return = np.squeeze(np.array(list_)).transpose(1, 2, 0).reshape(-1, 1, new_H, len(indices_list) - 1)
+        return torch.from_numpy(ts_return)
+
+    def decay_linear_4d(self, mat):
+        new_H = mat.shape[2]
+        indices_list = self.indices_list
+        list_ = []
+        for i in range(len(indices_list) - 1):
+            start_index = indices_list[i]
+            end_index = indices_list[i + 1]
+            range_ = end_index - start_index
+            weight = np.arange(1, range_ + 1)
+            weight = weight / weight.sum()
+            data = mat[:, :, :, start_index:end_index]
+            wd = (data * weight).sum(axis=3, keepdims=True)
+            list_.append(wd)
+        ts_decay_linear = np.squeeze(np.array(list_)).transpose(1, 2, 0).reshape(-1, 1, new_H, len(indices_list) - 1)
+        return torch.from_numpy(ts_decay_linear)
+
+    def mean_4d(self, mat):
+        new_H = mat.shape[2]
+        indices_list = self.indices_list
+        list_ = []
+        for i in range(len(indices_list) - 1):
+            start_index = indices_list[i]
+            end_index = indices_list[i + 1]
+            data = mat[:, :, :, start_index:end_index]
+            mean_ = data.mean(axis=3, keepdims=True)
+            list_.append(mean_)
+        ts_mean = np.squeeze(np.array(list_)).transpose(1, 2, 0).reshape(-1, 1, new_H, len(indices_list) - 1)
+        return torch.from_numpy(ts_mean)
+
+
+class AlphaNetwork(nn.Module):
+    def __init__(self, combos, combos_rev, indices_list, fc1_size, fc2_size, dropout_rate):
+        super(AlphaNetwork, self).__init__()
+        self.combos = combos
+        self.combos_rev = combos_rev
+        self.fc1_size = fc1_size
+        self.fc2_size = fc2_size
+        self.InceptionNetwork = InceptionNetwork(combos, combos_rev, indices_list)
+        self.fc1 = nn.Linear(fc1_size, fc2_size)
+        self.fc2 = nn.Linear(fc2_size, 1)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout_rate)
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        nn.init.xavier_uniform_(self.fc1.weight)
+        nn.init.xavier_uniform_(self.fc2.weight)
+        nn.init.normal_(self.fc1.bias, std=1e-6)
+        nn.init.normal_(self.fc2.bias, std=1e-6)
+
+    def forward(self, data):
+        data = self.InceptionNetwork(data)
+        data = self.fc1(data)
+        data = self.relu(data)
+        data = self.dropout(data)
+        data = self.fc2(data)
+        data = data.to(torch.float)
+        return data
+
+
+test_net = AlphaNetwork(combo_list, combo_rev_list, indices_list, fc1_size=462, fc2_size=30, dropout_rate=0.5)
+summary(test_net, input_size=(1, 7, 30))
